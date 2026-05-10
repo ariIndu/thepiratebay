@@ -1,303 +1,161 @@
 '''
-This is the main module
+The Pirate Bay Unofficial API - Robust 2026 Version
 '''
 import os
-
 import requests
 import re
 from bs4 import BeautifulSoup
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime, timedelta
 
-
+# Must match Dockerfile: app:APP
 APP = Flask(__name__)
 CORS(APP)
 EMPTY_LIST = []
 
-BASE_URL = os.getenv('BASE_URL', 'https://thepiratebay.org/')
-JSONIFY_PRETTYPRINT_REGULAR = True
+# Cleanup BASE_URL from env to prevent // errors
+BASE_URL = os.getenv('BASE_URL', 'https://tpb.party').rstrip('/')
 
 # Translation table for sorting filters
 sort_filters = {
-    'title_asc': 1,
-    'title_desc': 2,
-    'time_desc': 3,
-    'time_asc': 4,
-    'size_desc': 5,
-    'size_asc': 6,
-    'seeds_desc': 7,
-    'seeds_asc': 8,
-    'leeches_desc': 9,
-    'leeches_asc': 10,
-    'uploader_asc': 11,
-    'uploader_desc': 12,
-    'category_asc': 13,
-    'category_desc': 14
+    'title_asc': 1, 'title_desc': 2, 'time_desc': 3, 'time_asc': 4,
+    'size_desc': 5, 'size_asc': 6, 'seeds_desc': 7, 'seeds_asc': 8,
+    'leeches_desc': 9, 'leeches_asc': 10, 'uploader_asc': 11,
+    'uploader_desc': 12, 'category_asc': 13, 'category_desc': 14
 }
 
+def get_headers():
+    '''Returns headers to bypass basic bot detection'''
+    return {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': f'{BASE_URL}/',
+    }
 
 @APP.route('/', methods=['GET'])
 def index():
-    '''
-    This is the home page and contains links to other API
-    '''
-    return render_template('index.html'), 200
-
-
-@APP.route('/top/', methods=['GET'])
-@APP.route('/top48h/', methods=['GET'])
-def default_top():
-    '''
-    Returns default page with categories
-    '''
-    return render_template('top.html'), 200
-
+    return jsonify({"status": "online", "message": "TPB API is active"}), 200
 
 @APP.route('/top/<int:cat>/', methods=['GET'])
 def top_torrents(cat=0):
-    '''
-    Returns top torrents
-    '''
-
     sort = request.args.get('sort')
     sort_arg = sort if sort in sort_filters else ''
-
-    if cat == 0:
-        url = BASE_URL + 'top/' + 'all/' + str(sort_arg)
-    else:
-        url = BASE_URL + 'top/' + str(cat) + '/' + str(sort_arg)
-    return jsonify(parse_page(url, sort=sort_arg)), 200
-
-
-@APP.route('/top48h/<int:cat>/', methods=['GET'])
-def top48h_torrents(cat=0):
-    '''
-    Returns top torrents last 48 hrs
-    '''
-
-    sort = request.args.get('sort')
-    sort_arg = sort if sort in sort_filters else ''
-
-    if cat == 0:
-        url = BASE_URL + 'top/48h' + 'all/'
-    else:
-        url = BASE_URL + 'top/48h' + str(cat)
-
-    return jsonify(parse_page(url, sort=sort_arg)), 200
-
+    cat_path = 'all' if cat == 0 else str(cat)
+    url = f"{BASE_URL}/top/{cat_path}/{sort_arg}"
+    return jsonify(parse_page(url, sort=sort)), 200
 
 @APP.route('/recent/', methods=['GET'])
 @APP.route('/recent/<int:page>/', methods=['GET'])
-def recent_torrents(page=0):
-    '''
-    This function implements recent page of TPB
-    '''
-    sort = request.args.get('sort')
-    sort_arg = sort if sort in sort_filters else ''
-
-    url = BASE_URL + 'recent/' + str(page)
-    return jsonify(parse_page(url, sort=sort_arg)), 200
-
-
-@APP.route('/api-search/', methods=['GET'])
-def api_search():
-    url = BASE_URL + 's/?' + request.query_string.decode('utf-8')
+def recent_torrents(page=1):
+    url = f"{BASE_URL}/recent/{page}"
     return jsonify(parse_page(url)), 200
-
-
-@APP.route('/search/', methods=['GET'])
-def default_search():
-    '''
-    Default page for search
-    '''
-    return 'No search term entered<br/>Format for search: /search/search_term/page_no(optional)/'
-
 
 @APP.route('/search/<term>/', methods=['GET'])
 @APP.route('/search/<term>/<int:page>/', methods=['GET'])
-def search_torrents(term=None, page=0):
-    '''
-    Searches TPB using the given term. If no term is given, defaults to recent.
-    '''
-
+def search_torrents(term=None, page=1):
     sort = request.args.get('sort')
-    sort_arg = sort_filters[request.args.get('sort')] if sort in sort_filters else ''
-
-    url = BASE_URL + 'search/' + str(term) + '/' + str(page) + '/' + str(sort_arg)
-    return jsonify(parse_page(url)), 200
-
+    sort_val = sort_filters.get(sort, '')
+    url = f"{BASE_URL}/search/{term}/{page}/{sort_val}"
+    return jsonify(parse_page(url, sort=sort)), 200
 
 def parse_page(url, sort=None):
-    '''
-    This function parses the page and returns list of torrents
-    '''
-    # 1. ADD HEADERS TO LOOK LIKE A BROWSER
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://google.com'
-    }
-
     try:
-        # 2. Use headers in the request
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.text
-        
-        # Log the status for debugging in Render
-        print(f"Scraping URL: {url} | Status: {response.status_code}")
-        
+        print(f"Scraping: {url}")
+        res = requests.get(url, headers=get_headers(), timeout=15)
+        res.raise_for_status()
+        data = res.text
     except Exception as e:
-        print(f"Request failed: {e}")
+        print(f"Scrape Failed: {e}")
         return EMPTY_LIST
 
     soup = BeautifulSoup(data, 'lxml')
-    
-    # 3. Check if we actually found the results table
-    table_present = soup.find('table', {'id': 'searchResult'})
-    
-    if table_present is None:
-        # If this happens, it means we got through but the mirror's HTML 
-        # is different or we are still being blocked by a CAPTCHA.
-        print("Table 'searchResult' not found in HTML. Might be a CAPTCHA block.")
+    if not soup.find('table', {'id': 'searchResult'}):
+        print("Table not found. Mirror might be blocking or changed HTML structure.")
         return EMPTY_LIST
 
-    titles = parse_titles(soup)
-    links = parse_links(soup)
-    magnets = parse_magnet_links(soup)
-    times, sizes, uploaders = parse_description(soup)
-    seeders, leechers = parse_seed_leech(soup)
-    cat, subcat = parse_cat(soup)
-    torrents = []
+    # Extract all components
+    titles = [t.get_text() for t in soup.find_all(class_='detLink')]
+    links = [l['href'] for l in soup.find_all('a', class_='detLink', href=True)]
     
-    for torrent in zip(titles, magnets, times, sizes, uploaders, seeders, leechers, cat, subcat, links):
-        torrents.append({
-            'title': torrent[0],
-            'magnet': torrent[1],
-            'time': convert_to_date(torrent[2]),
-            'size': convert_to_bytes(torrent[3]),
-            'uploader': torrent[4],
-            'seeds': int(torrent[5]),
-            'leeches': int(torrent[6]),
-            'category': torrent[7],
-            'subcat': torrent[8],
-            'id': torrent[9],
-        })
+    # Magnet links
+    all_links = soup.find('table', {'id': 'searchResult'}).find_all('a', href=True)
+    magnets = [m['href'] for m in all_links if 'magnet' in m['href']]
 
-    if sort:
-        sort_params = sort.split('_')
-        torrents = sorted(torrents, key=lambda k: k.get(sort_params[0]), reverse=sort_params[1].upper() == 'DESC')
+    # Seeders/Leechers
+    slinfo = [s.get_text() for s in soup.find_all('td', {'align': 'right'})]
+    seeders = slinfo[::2]
+    leechers = slinfo[1::2]
+
+    # Description (Robust version)
+    times, sizes, uploaders = parse_description(soup)
+    
+    # Categories
+    raw_cats = [c.get_text().replace('(', '').replace(')', '').split() for c in soup.find_all('center')]
+    cat = [c[0] if c else "Other" for c in raw_cats]
+    subcat = [" ".join(c[1:]) if len(c) > 1 else "Other" for c in raw_cats]
+
+    torrents = []
+    # Zip everything safely
+    for i in range(len(titles)):
+        try:
+            torrents.append({
+                'title': titles[i],
+                'magnet': magnets[i] if i < len(magnets) else "",
+                'time': convert_to_date(times[i]) if i < len(times) else "Unknown",
+                'size': convert_to_bytes(sizes[i]) if i < len(sizes) else 0,
+                'uploader': uploaders[i] if i < len(uploaders) else "Unknown",
+                'seeds': int(seeders[i]) if i < len(seeders) else 0,
+                'leeches': int(leechers[i]) if i < len(leechers) else 0,
+                'category': cat[i] if i < len(cat) else "Unknown",
+                'subcat': subcat[i] if i < len(subcat) else "Unknown",
+                'id': links[i] if i < len(links) else "",
+            })
+        except: continue
+
+    if sort and '_' in sort:
+        try:
+            field, direction = sort.split('_')
+            torrents.sort(key=lambda x: x.get(field, 0), reverse=(direction.upper() == 'DESC'))
+        except: pass
 
     return torrents
 
-
-def parse_magnet_links(soup):
-    '''
-    Returns list of magnet links from soup
-    '''
-    magnets = soup.find('table', {'id': 'searchResult'}).find_all('a', href=True)
-    magnets = [magnet['href'] for magnet in magnets if 'magnet' in magnet['href']]
-    return magnets
-
-
-def parse_titles(soup):
-    '''
-    Returns list of titles of torrents from soup
-    '''
-    titles = soup.find_all(class_='detLink')
-    titles[:] = [title.get_text() for title in titles]
-    return titles
-
-
-def parse_links(soup):
-    '''
-    Returns list of links of torrents from soup
-    '''
-    links = soup.find_all('a', class_='detLink', href=True)
-    links[:] = [link['href'] for link in links]
-    return links
-
-
 def parse_description(soup):
-    '''
-    Returns list of time, size and uploader from soup
-    '''
-    description = soup.find_all('font', class_='detDesc')
-    description[:] = [desc.get_text().split(',') for desc in description]
-    times, sizes, uploaders = map(list, zip(*description))
-    times[:] = [time.replace(u'\xa0', u' ').replace('Uploaded ', '') for time in times]
-    sizes[:] = [size.replace(u'\xa0', u' ').replace(' Size ', '') for size in sizes]
-    uploaders[:] = [uploader.replace(' ULed by ', '') for uploader in uploaders]
+    desc_tags = soup.find_all('font', class_='detDesc')
+    times, sizes, uploaders = [], [], []
+    for d in desc_tags:
+        text = d.get_text().replace(u'\xa0', u' ')
+        parts = text.split(',')
+        times.append(parts[0].replace('Uploaded ', '').strip() if len(parts) > 0 else "")
+        sizes.append(parts[1].replace(' Size ', '').strip() if len(parts) > 1 else "")
+        uploaders.append(parts[2].replace(' ULed by ', '').strip() if len(parts) > 2 else "Unknown")
     return times, sizes, uploaders
 
-
-def parse_seed_leech(soup):
-    '''
-    Returns list of numbers of seeds and leeches from soup
-    '''
-    slinfo = soup.find_all('td', {'align': 'right'})
-    seeders = slinfo[::2]
-    leechers = slinfo[1::2]
-    seeders[:] = [seeder.get_text() for seeder in seeders]
-    leechers[:] = [leecher.get_text() for leecher in leechers]
-    return seeders, leechers
-
-
-def parse_cat(soup):
-    '''
-    Returns list of category and subcategory
-    '''
-    cat_subcat = soup.find_all('center')
-    cat_subcat[:] = [c.get_text().replace('(', '').replace(')', '').split() for c in cat_subcat]
-    cat = [cs[0] for cs in cat_subcat]
-    subcat = [' '.join(cs[1:]) for cs in cat_subcat]
-    return cat, subcat
-
-
 def convert_to_bytes(size_str):
-    '''
-    Converts torrent sizes to a common count in bytes.
-    '''
-    size_data = size_str.split()
-
-    multipliers = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']
-
-    size_magnitude = float(size_data[0])
-    multiplier_exp = multipliers.index(size_data[1])
-    size_multiplier = 1024 ** multiplier_exp if multiplier_exp > 0 else 1
-
-    return size_magnitude * size_multiplier
-
+    try:
+        data = size_str.split()
+        if len(data) < 2: return 0
+        multipliers = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+        mag = float(data[0])
+        exp = multipliers.index(data[1])
+        return int(mag * (1024 ** exp))
+    except: return 0
 
 def convert_to_date(date_str):
-    '''
-    Converts the dates into a proper standardized datetime.
-    '''
-    date_format = None
+    try:
+        date_str = date_str.strip()
+        if 'min' in date_str:
+            mins = int(re.findall(r'\d+', date_str)[0])
+            return (datetime.now() - timedelta(minutes=mins)).strftime('%Y-%m-%d %H:%M')
+        if 'Today' in date_str:
+            return date_str.replace('Today', datetime.now().strftime('%Y-%m-%d'))
+        if 'Y-day' in date_str:
+            yesterday = datetime.now() - timedelta(days=1)
+            return date_str.replace('Y-day', yesterday.strftime('%Y-%m-%d'))
+        return date_str
+    except: return date_str
 
-    if re.search('^[0-9]+ min(s)? ago$', date_str.strip()):
-        minutes_delta = int(date_str.split()[0])
-        torrent_dt = datetime.now() - timedelta(minutes=minutes_delta)
-        date_str = '{}-{}-{} {}:{}'.format(torrent_dt.year, torrent_dt.month, torrent_dt.day, torrent_dt.hour, torrent_dt.minute)
-        date_format = '%Y-%m-%d %H:%M'
-
-    elif re.search('^[0-9]*-[0-9]*\s[0-9]+:[0-9]+$', date_str.strip()):
-        today = datetime.today()
-        date_str = '{}-'.format(today.year) + date_str
-        date_format = '%Y-%m-%d %H:%M'
-    
-    elif re.search('^Today\s[0-9]+\:[0-9]+$', date_str):
-        today = datetime.today()
-        date_str = date_str.replace('Today', '{}-{}-{}'.format(today.year, today.month, today.day))
-        date_format = '%Y-%m-%d %H:%M'
-    
-    elif re.search('^Y-day\s[0-9]+\:[0-9]+$', date_str):
-        today = datetime.today() - timedelta(days=1)
-        date_str = date_str.replace('Y-day', '{}-{}-{}'.format(today.year, today.month, today.day))
-        date_format = '%Y-%m-%d %H:%M'
-
-    else:
-        date_format = '%m-%d %Y'
-
-    return datetime.strptime(date_str, date_format)
+if __name__ == '__main__':
+    APP.run(host='0.0.0.0', port=5000)
