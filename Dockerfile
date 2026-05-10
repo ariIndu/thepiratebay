@@ -1,10 +1,11 @@
-# Use a modern Python version
-FROM python:3.9-slim-buster
+# Use a modern, supported Python image (Debian Bookworm)
+FROM python:3.11-slim-bookworm
 
 # Set the working directory
 WORKDIR /app
 
 # Install system dependencies for lxml
+# These repositories are actually active and won't 404
 RUN apt-get update && apt-get install -y \
     libxml2-dev \
     libxslt-dev \
