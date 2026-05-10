@@ -108,6 +108,39 @@ def fetch_and_format(url):
         print(f"Critical API Error: {e}")
         return []
 
+@APP.route('/details/<int:torrent_id>/', methods=['GET'])
+def torrent_details(torrent_id):
+    '''Returns the list of individual files inside a torrent'''
+    # The 'f.php' endpoint is for files
+    url = f"{API_URL}/f.php?id={torrent_id}"
+    
+    try:
+        print(f"Fetching file list for ID: {torrent_id}")
+        response = scraper.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return jsonify({"error": "Could not fetch details"}), response.status_code
+
+        files = response.json()
+        
+        # Format the file data
+        formatted_files = []
+        for f in files:
+            formatted_files.append({
+                'name': f.get('name', [ 'Unknown' ])[0], # Apibay often returns name as a list
+                'size': f.get('size', [ 0 ])[0]
+            })
+            
+        return jsonify({
+            "id": torrent_id,
+            "file_count": len(formatted_files),
+            "files": formatted_files
+        }), 200
+
+    except Exception as e:
+        print(f"Details Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     # For local testing
     APP.run(host='0.0.0.0', port=5000)
