@@ -1,24 +1,26 @@
-FROM python:3.6.4-alpine3.7
+# Use a modern Python version
+FROM python:3.9-slim-buster
 
-RUN apk add --no-cache git
+# Set the working directory
+WORKDIR /app
 
-ENV BASE_URL=https://thepiratebay.org/
+# Install system dependencies for lxml
+RUN apt-get update && apt-get install -y \
+    libxml2-dev \
+    libxslt-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt requirements.txt
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-RUN apk add --no-cache libxml2-dev && \
-    apk add --no-cache libxml2 && \
-    apk add --update --no-cache g++ gcc libxslt-dev && \
-    pip3 install -r ./requirements.txt
-
-
-WORKDIR /opt
-
-RUN mkdir -p thepiratebay
-WORKDIR /opt/thepiratebay
-
+# Copy the rest of the app
 COPY . .
 
-RUN ["chmod", "+x", "entrypoint.sh"]
+# Expose the port Flask runs on
+EXPOSE 5000
 
-ENTRYPOINT ["./entrypoint.sh"]
+# Start the application with Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
