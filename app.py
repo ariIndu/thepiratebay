@@ -132,11 +132,37 @@ def parse_page(url, sort=None):
     '''
     This function parses the page and returns list of torrents
     '''
-    data = requests.get(url).text
-    soup = BeautifulSoup(data, 'lxml')
-    table_present = soup.find('table', {'id': 'searchResult'})
-    if table_present is None:
+    # 1. ADD HEADERS TO LOOK LIKE A BROWSER
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://google.com'
+    }
+
+    try:
+        # 2. Use headers in the request
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.text
+        
+        # Log the status for debugging in Render
+        print(f"Scraping URL: {url} | Status: {response.status_code}")
+        
+    except Exception as e:
+        print(f"Request failed: {e}")
         return EMPTY_LIST
+
+    soup = BeautifulSoup(data, 'lxml')
+    
+    # 3. Check if we actually found the results table
+    table_present = soup.find('table', {'id': 'searchResult'})
+    
+    if table_present is None:
+        # If this happens, it means we got through but the mirror's HTML 
+        # is different or we are still being blocked by a CAPTCHA.
+        print("Table 'searchResult' not found in HTML. Might be a CAPTCHA block.")
+        return EMPTY_LIST
+
     titles = parse_titles(soup)
     links = parse_links(soup)
     magnets = parse_magnet_links(soup)
@@ -144,6 +170,7 @@ def parse_page(url, sort=None):
     seeders, leechers = parse_seed_leech(soup)
     cat, subcat = parse_cat(soup)
     torrents = []
+    
     for torrent in zip(titles, magnets, times, sizes, uploaders, seeders, leechers, cat, subcat, links):
         torrents.append({
             'title': torrent[0],
